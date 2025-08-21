@@ -69,6 +69,7 @@ const (
 	statePasswordInput
 	stateError
 	stateKeyBindings
+	stateAddDbForm // Новое состояние для формы добавления БД
 )
 
 type model struct {
@@ -76,6 +77,7 @@ type model struct {
 	list          list.Model
 	fileList      list.Model
 	passwordInput textinput.Model
+	titleInput    textinput.Model
 	choice        string
 	fileChoice    string
 	errorMsg      string
@@ -151,8 +153,23 @@ func createPasswordInput() textinput.Model {
 	return input
 }
 
+// Создание поля ввода заголовка
+func createTitleInput() textinput.Model {
+	input := textinput.New()
+	input.Placeholder = "Enter database title"
+	input.Focus()
+	input.CharLimit = 100
+	input.Width = 30
+	return input
+}
+
 // Обработка глобальных клавиш
 func (m *model) handleGlobalKeys(keypress string) (tea.Model, tea.Cmd) {
+	// Глобальные клавиши не действуют в форме добавления БД
+	if m.state == stateAddDbForm {
+		return nil, nil
+	}
+
 	switch keypress {
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -173,6 +190,7 @@ func (m *model) resetToMainMenu() model {
 	m.choice = ""
 	m.fileChoice = ""
 	m.passwordInput = textinput.Model{}
+	m.titleInput = textinput.Model{}
 	m.errorMsg = ""
 	return *m
 }
@@ -193,6 +211,11 @@ func (m *model) goBack() model {
 	case stateKeyBindings:
 		m.state = stateMainMenu
 		m.choice = ""
+	case stateAddDbForm:
+		m.state = stateMainMenu
+		m.choice = ""
+		m.titleInput = textinput.Model{}
+		m.passwordInput = textinput.Model{}
 	}
 	return *m
 }
@@ -207,6 +230,13 @@ func (m *model) handleMainMenuEnter() (tea.Model, tea.Cmd) {
 	m.choice = string(i)
 
 	switch m.choice {
+	case "Add db":
+		m.titleInput = createTitleInput()
+		m.passwordInput = createPasswordInput()
+		m.titleInput.Focus()
+		m.passwordInput.Blur()
+		m.state = stateAddDbForm
+
 	case "Open db":
 		m.fileList = createFileList()
 		m.state = stateFileList
@@ -246,6 +276,22 @@ func (m *model) handlePasswordEnter() (tea.Model, tea.Cmd) {
 	return *m, tea.Quit
 }
 
+// Обработка Enter в форме добавления БД
+func (m *model) handleAddDbFormEnter() (tea.Model, tea.Cmd) {
+	config := ReadConfigFile()
+
+	err := CreatePasswordFile(m.titleInput.Value(), config.DBsFolder, m.passwordInput.Value())
+	if err != nil {
+		return *m, tea.Println("Creat Error")
+	}
+	// Возвращаемся в главное меню после добавления
+	m.state = stateMainMenu
+	m.choice = ""
+	m.titleInput = textinput.Model{}
+	m.passwordInput = textinput.Model{}
+	return *m, nil
+}
+
 // Обработка Enter в состоянии ошибки
 func (m *model) handleErrorEnter() (tea.Model, tea.Cmd) {
 	m.state = statePasswordInput
@@ -283,7 +329,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return model, cmd
 		}
 
-		// Обработка Enter
+		// Специальная обработка для формы добавления БД
+		if m.state == stateAddDbForm {
+			switch keyMsg.String() {
+			case "esc":
+				// Escape возвращает в главное меню
+				return m.resetToMainMenu(), nil
+
+			case "enter":
+				return m.handleAddDbFormEnter()
+
+			case "tab":
+				// Переключение между полями
+				if m.titleInput.Focused() {
+					m.titleInput.Blur()
+					m.passwordInput.Focus()
+				} else {
+					m.passwordInput.Blur()
+					m.titleInput.Focus()
+				}
+				return m, nil
+			}
+		}
+
+		// Обработка Enter для других состояний
 		if keyMsg.String() == "enter" {
 			switch m.state {
 			case stateMainMenu:
@@ -308,6 +377,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stateFileList:
 		m.fileList, cmd = m.fileList.Update(msg)
 	case statePasswordInput:
+		m.passwordInput, cmd = m.passwordInput.Update(msg)
+	case stateAddDbForm:
+		// Обновляем оба текстовых поля
+		m.titleInput, cmd = m.titleInput.Update(msg)
+		if cmd != nil {
+			return m, cmd
+		}
 		m.passwordInput, cmd = m.passwordInput.Update(msg)
 	}
 
@@ -353,6 +429,20 @@ func (m model) View() string {
 			"\n\n" + "(b: back to files, m: main menu)"
 		content = m.centerContent(styledForm)
 
+	case stateAddDbForm:
+		formContent := fmt.Sprintf(
+			"Add New Database\n\nTitle: %s\nPassword: %s\n\n%s",
+			m.titleInput.View(),
+			m.passwordInput.View(),
+			"(Tab to switch fields, Enter to submit, Esc to cancel)",
+		)
+		styledForm := lipgloss.NewStyle().
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Render(formContent)
+		content = m.centerContent(styledForm)
+
 	case stateError:
 		errorContent := errorStyle.Render(m.errorMsg) + "\n\n(press enter to continue)"
 		content = m.centerContent(errorContent)
@@ -395,6 +485,11 @@ File Selection:
   ↑/↓          - Navigate files
   Enter        - Select file
 
+Add Database Form:
+  Tab          - Switch between fields
+  Enter        - Submit form
+  Esc          - Cancel and return to main menu
+
 Password Input:
   Any chars    - Type password (hidden)
   Enter        - Submit password
@@ -416,4 +511,5 @@ func main() {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
+
 }

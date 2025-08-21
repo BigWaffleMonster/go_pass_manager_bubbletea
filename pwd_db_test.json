@@ -1,0 +1,43 @@
+{
+  "header": {
+    "crypto": {
+      "cipher": "AES-256",
+      "compression": "GZip"
+    }
+  },
+  "database": {
+    "meta": {
+      "name": "My Passwords",
+      "description": "Personal password database"
+    },
+    "entries": [
+      {
+        "id": "entry_001",
+        "title": "Google Account",
+        "username": "myemail@gmail.com",
+        "password": "encrypted_password_data",
+        "url": "https://accounts.google.com",
+        "notes": "Personal Google account",
+        "created": "2023-01-15T10:30:00Z"
+      },
+      {
+        "id": "entry_002",
+        "title": "Bank Account",
+        "username": "account123",
+        "password": "encrypted_password_data",
+        "url": "https://bank.example.com",
+        "notes": "Checking account",
+        "created": "2023-03-22T09:15:00Z"
+      },
+      {
+        "id": "entry_003",
+        "title": "GitHub",
+        "username": "myusername",
+        "password": "encrypted_password_data",
+        "url": "https://github.com",
+        "notes": "Development account",
+        "created": "2023-05-10T14:20:00Z"
+      }
+    ]
+  }
+}

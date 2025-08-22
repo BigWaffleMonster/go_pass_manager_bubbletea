@@ -19,7 +19,6 @@ var (
 	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
 	helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
 	quitTextStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
-	errorStyle        = lipgloss.NewStyle().Margin(1, 0, 2, 4).Foreground(lipgloss.Color("196"))
 	bindingsStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
 
 	// Стили для центрирования
@@ -32,6 +31,33 @@ var (
 	centerStyle = lipgloss.NewStyle().
 			Align(lipgloss.Center).
 			AlignVertical(lipgloss.Center)
+
+	// Стили для формы
+	formStyle = lipgloss.NewStyle().
+			Padding(1, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240"))
+
+	// Стили для полей ввода
+	labelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Width(10).
+			MarginRight(1)
+
+	inputFieldStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(lipgloss.Color("240")).
+			Padding(0, 0)
+
+	focusedInputFieldStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, false, true, false).
+				BorderForeground(lipgloss.Color("170")).
+				Padding(0, 0)
+
+	errorInputFieldStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, false, true, false).
+				BorderForeground(lipgloss.Color("196")).
+				Padding(0, 0)
 )
 
 type item string
@@ -67,23 +93,23 @@ const (
 	stateMainMenu state = iota
 	stateFileList
 	statePasswordInput
-	stateError
 	stateKeyBindings
-	stateAddDbForm // Новое состояние для формы добавления БД
+	stateAddDbForm
 )
 
 type model struct {
-	state         state
-	list          list.Model
-	fileList      list.Model
-	passwordInput textinput.Model
-	titleInput    textinput.Model
-	choice        string
-	fileChoice    string
-	errorMsg      string
-	quitting      bool
-	width         int
-	height        int
+	state              state
+	list               list.Model
+	fileList           list.Model
+	passwordInput      textinput.Model
+	titleInput         textinput.Model
+	choice             string
+	fileChoice         string
+	quitting           bool
+	width              int
+	height             int
+	titleInputError    bool
+	passwordInputError bool
 }
 
 // Инициализация модели с динамической высотой списка
@@ -95,14 +121,12 @@ func initialModel() model {
 		item("Key bindings"),
 	}
 
-	// Динамическая высота: количество элементов + заголовок + пагинация + отступы
-	listHeight := len(items) + 8 // +4 для заголовка, пагинации, статуса и отступов
-
+	listHeight := len(items) + 8
 	const defaultWidth = 30
 
 	l := list.New(items, itemDelegate{}, defaultWidth, listHeight)
 	l.Title = "What do you want for dinner?"
-	l.SetShowStatusBar(true) // Включаем статус бар для лучшего отображения
+	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
@@ -116,23 +140,26 @@ func initialModel() model {
 	}
 }
 
-// Создание списка файлов БД с динамической высотой
+// Создание списка файлов БД с красными placeholder'ами при ошибках
 func createFileList() list.Model {
-	files := []list.Item{
-		item("database1.db"),
-		item("users.db"),
-		item("products.db"),
-		item("orders.db"),
+	var files []list.Item
+	config := ReadConfigFile()
+
+	data, err := ReadDBsFolder(config.DBsFolder)
+	if err != nil {
+		fmt.Print(err)
 	}
 
-	// Динамическая высота: количество файлов + заголовок + пагинация + отступы
-	listHeight := len(files) + 10 // +4 для заголовка, пагинации, статуса и отступов
+	for _, filename := range data {
+		files = append(files, item(filename))
+	}
 
+	listHeight := len(files) + 10
 	const defaultWidth = 30
 
 	fileList := list.New(files, itemDelegate{}, defaultWidth, listHeight)
 	fileList.Title = "Select a database file"
-	fileList.SetShowStatusBar(true) // Включаем статус бар
+	fileList.SetShowStatusBar(true)
 	fileList.SetFilteringEnabled(false)
 	fileList.Styles.Title = titleStyle
 	fileList.Styles.PaginationStyle = paginationStyle
@@ -141,22 +168,30 @@ func createFileList() list.Model {
 	return fileList
 }
 
-// Создание поля ввода пароля
-func createPasswordInput() textinput.Model {
+// Создание поля ввода пароля с возможностью установки красного placeholder'а
+func createPasswordInputWithError(errorState bool) textinput.Model {
 	input := textinput.New()
-	input.Placeholder = "Enter password"
+	if errorState {
+		input.Placeholder = "Enter password" // Оставляем обычный placeholder, стилизуем через границу
+	} else {
+		input.Placeholder = "Enter password"
+	}
 	input.Focus()
 	input.CharLimit = 156
-	input.Width = 20
+	input.Width = 30
 	input.EchoMode = textinput.EchoPassword
 	input.EchoCharacter = '*'
 	return input
 }
 
-// Создание поля ввода заголовка
-func createTitleInput() textinput.Model {
+// Создание поля ввода заголовка с возможностью установки красного placeholder'а
+func createTitleInputWithError(errorState bool) textinput.Model {
 	input := textinput.New()
-	input.Placeholder = "Enter database title"
+	if errorState {
+		input.Placeholder = "Enter database title" // Оставляем обычный placeholder, стилизуем через границу
+	} else {
+		input.Placeholder = "Enter database title"
+	}
 	input.Focus()
 	input.CharLimit = 100
 	input.Width = 30
@@ -165,8 +200,7 @@ func createTitleInput() textinput.Model {
 
 // Обработка глобальных клавиш
 func (m *model) handleGlobalKeys(keypress string) (tea.Model, tea.Cmd) {
-	// Глобальные клавиши не действуют в форме добавления БД
-	if m.state == stateAddDbForm {
+	if m.state == stateAddDbForm || m.state == statePasswordInput {
 		return nil, nil
 	}
 
@@ -191,7 +225,8 @@ func (m *model) resetToMainMenu() model {
 	m.fileChoice = ""
 	m.passwordInput = textinput.Model{}
 	m.titleInput = textinput.Model{}
-	m.errorMsg = ""
+	m.titleInputError = false
+	m.passwordInputError = false
 	return *m
 }
 
@@ -205,9 +240,7 @@ func (m *model) goBack() model {
 		m.state = stateFileList
 		m.fileChoice = ""
 		m.passwordInput = textinput.Model{}
-	case stateError:
-		m.state = statePasswordInput
-		m.errorMsg = ""
+		m.passwordInputError = false
 	case stateKeyBindings:
 		m.state = stateMainMenu
 		m.choice = ""
@@ -216,6 +249,8 @@ func (m *model) goBack() model {
 		m.choice = ""
 		m.titleInput = textinput.Model{}
 		m.passwordInput = textinput.Model{}
+		m.titleInputError = false
+		m.passwordInputError = false
 	}
 	return *m
 }
@@ -231,10 +266,12 @@ func (m *model) handleMainMenuEnter() (tea.Model, tea.Cmd) {
 
 	switch m.choice {
 	case "Add db":
-		m.titleInput = createTitleInput()
-		m.passwordInput = createPasswordInput()
+		m.titleInput = createTitleInputWithError(false)
+		m.passwordInput = createPasswordInputWithError(false)
 		m.titleInput.Focus()
 		m.passwordInput.Blur()
+		m.titleInputError = false
+		m.passwordInputError = false
 		m.state = stateAddDbForm
 
 	case "Open db":
@@ -256,7 +293,8 @@ func (m *model) handleFileListEnter() (tea.Model, tea.Cmd) {
 	}
 
 	m.fileChoice = string(i)
-	m.passwordInput = createPasswordInput()
+	m.passwordInput = createPasswordInputWithError(false)
+	m.passwordInputError = false
 	m.state = statePasswordInput
 
 	return *m, nil
@@ -265,9 +303,13 @@ func (m *model) handleFileListEnter() (tea.Model, tea.Cmd) {
 // Обработка Enter при вводе пароля
 func (m *model) handlePasswordEnter() (tea.Model, tea.Cmd) {
 	if m.passwordInput.Value() == "" {
-		m.errorMsg = "passkey missing"
-		m.state = stateError
-		return *m, nil
+		m.passwordInputError = true
+		// Пересоздаем input с красной границей
+		m.passwordInput = createPasswordInputWithError(true)
+		if m.state == stateAddDbForm {
+			m.passwordInput.Focus()
+		}
+		return m, nil
 	}
 
 	// Здесь можно обработать введенный пароль
@@ -278,24 +320,47 @@ func (m *model) handlePasswordEnter() (tea.Model, tea.Cmd) {
 
 // Обработка Enter в форме добавления БД
 func (m *model) handleAddDbFormEnter() (tea.Model, tea.Cmd) {
+	titleEmpty := m.titleInput.Value() == ""
+	passwordEmpty := m.passwordInput.Value() == ""
+
+	m.titleInputError = titleEmpty
+	m.passwordInputError = passwordEmpty
+
+	// Если есть пустые поля, пересоздаем inputs с красными границами
+	if titleEmpty || passwordEmpty {
+		if titleEmpty {
+			m.titleInput = createTitleInputWithError(true)
+			m.titleInput.Blur()
+		}
+		if passwordEmpty {
+			m.passwordInput = createPasswordInputWithError(true)
+			m.passwordInput.Blur()
+		}
+		// Устанавливаем фокус на первое пустое поле
+		if titleEmpty {
+			m.titleInput.Focus()
+		} else {
+			m.passwordInput.Focus()
+		}
+		return m, nil
+	}
+
+	// Все данные введены корректно, продолжаем
 	config := ReadConfigFile()
 
 	err := CreatePasswordFile(m.titleInput.Value(), config.DBsFolder, m.passwordInput.Value())
 	if err != nil {
-		return *m, tea.Println("Creat Error")
+		// Можно добавить обработку ошибки создания файла здесь
+		return m, nil
 	}
+
 	// Возвращаемся в главное меню после добавления
 	m.state = stateMainMenu
 	m.choice = ""
 	m.titleInput = textinput.Model{}
 	m.passwordInput = textinput.Model{}
-	return *m, nil
-}
-
-// Обработка Enter в состоянии ошибки
-func (m *model) handleErrorEnter() (tea.Model, tea.Cmd) {
-	m.state = statePasswordInput
-	m.errorMsg = ""
+	m.titleInputError = false
+	m.passwordInputError = false
 	return *m, nil
 }
 
@@ -311,7 +376,6 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Обработка сообщений о размере окна
 	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = windowMsg.Width
 		m.height = windowMsg.Height
@@ -322,25 +386,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Обработка нажатий клавиш
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		// Проверка глобальных клавиш
 		if model, cmd := m.handleGlobalKeys(keyMsg.String()); cmd != nil || m.quitting {
 			return model, cmd
 		}
 
-		// Специальная обработка для формы добавления БД
 		if m.state == stateAddDbForm {
 			switch keyMsg.String() {
 			case "esc":
-				// Escape возвращает в главное меню
 				return m.resetToMainMenu(), nil
 
 			case "enter":
 				return m.handleAddDbFormEnter()
 
 			case "tab":
-				// Переключение между полями
 				if m.titleInput.Focused() {
 					m.titleInput.Blur()
 					m.passwordInput.Focus()
@@ -352,7 +411,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Обработка Enter для других состояний
+		if m.state == statePasswordInput {
+			switch keyMsg.String() {
+			case "esc":
+				return m.resetToMainMenu(), nil
+
+			case "enter":
+				return m.handlePasswordEnter()
+			}
+		}
+
 		if keyMsg.String() == "enter" {
 			switch m.state {
 			case stateMainMenu:
@@ -361,15 +429,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleFileListEnter()
 			case statePasswordInput:
 				return m.handlePasswordEnter()
-			case stateError:
-				return m.handleErrorEnter()
 			case stateKeyBindings:
 				return m.handleBindingsEnter()
 			}
 		}
 	}
 
-	// Обновление компонентов в зависимости от состояния
 	var cmd tea.Cmd
 	switch m.state {
 	case stateMainMenu:
@@ -379,7 +444,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statePasswordInput:
 		m.passwordInput, cmd = m.passwordInput.Update(msg)
 	case stateAddDbForm:
-		// Обновляем оба текстовых поля
 		m.titleInput, cmd = m.titleInput.Update(msg)
 		if cmd != nil {
 			return m, cmd
@@ -392,12 +456,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // Центрирование контента
 func (m model) centerContent(content string) string {
-	// Создаем стиль с размерами экрана для центрирования
 	centeredStyle := centerStyle.
 		Width(m.width).
 		Height(m.height)
 
 	return centeredStyle.Render(content)
+}
+
+// Рендеринг поля ввода с учетом ошибок
+func (m model) renderInputWithError(input textinput.Model, hasError bool, label string) string {
+	// Применяем стили к полю ввода в зависимости от состояния
+	var inputStyle lipgloss.Style
+	if hasError {
+		inputStyle = errorInputFieldStyle
+	} else if input.Focused() {
+		inputStyle = focusedInputFieldStyle
+	} else {
+		inputStyle = inputFieldStyle
+	}
+
+	// Рендерим поле ввода
+	inputView := inputStyle.Render(input.View())
+
+	// Стилизуем label
+	styledLabel := labelStyle.Render(label + ":")
+
+	// Комбинируем label и input в одной строке
+	inputRow := lipgloss.JoinHorizontal(lipgloss.Left, styledLabel, inputView)
+
+	return inputRow
 }
 
 func (m model) View() string {
@@ -415,44 +502,35 @@ func (m model) View() string {
 		content = m.centerContent(listContent)
 
 	case statePasswordInput:
+		passwordField := m.renderInputWithError(m.passwordInput, m.passwordInputError, "Password")
 		formContent := fmt.Sprintf(
-			"Selected file: %s\n\nPassword: %s\n\n%s",
+			"Selected file: %s\n\n%s\n\n%s",
 			m.fileChoice,
-			m.passwordInput.View(),
+			passwordField,
 			"(press enter to submit)",
 		)
-		styledForm := lipgloss.NewStyle().
-			Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Render(formContent) +
-			"\n\n" + "(b: back to files, m: main menu)"
+		styledForm := formStyle.Render(formContent) +
+			"\n\n" + "(Enter to submit, Esc to cancel)"
 		content = m.centerContent(styledForm)
 
 	case stateAddDbForm:
+		titleField := m.renderInputWithError(m.titleInput, m.titleInputError, "Title")
+		passwordField := m.renderInputWithError(m.passwordInput, m.passwordInputError, "Password")
+
 		formContent := fmt.Sprintf(
-			"Add New Database\n\nTitle: %s\nPassword: %s\n\n%s",
-			m.titleInput.View(),
-			m.passwordInput.View(),
+			"Add New Database\n\n%s\n\n%s\n\n%s",
+			titleField,
+			passwordField,
 			"(Tab to switch fields, Enter to submit, Esc to cancel)",
 		)
-		styledForm := lipgloss.NewStyle().
-			Padding(1, 2).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Render(formContent)
+		styledForm := formStyle.Render(formContent)
 		content = m.centerContent(styledForm)
-
-	case stateError:
-		errorContent := errorStyle.Render(m.errorMsg) + "\n\n(press enter to continue)"
-		content = m.centerContent(errorContent)
 
 	case stateKeyBindings:
 		bindingsContent := bindingsStyle.Render(getKeyBindingsText())
 		content = m.centerContent(bindingsContent)
 	}
 
-	// Финальный экран
 	if m.quitting {
 		var quitContent string
 		if m.choice != "" && m.fileChoice != "" {
@@ -494,9 +572,6 @@ Password Input:
   Any chars    - Type password (hidden)
   Enter        - Submit password
 
-Error Screen:
-  Enter        - Return to password input
-
 Key Bindings Screen:
   Enter        - Return to main menu
 
@@ -511,5 +586,4 @@ func main() {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
-
 }

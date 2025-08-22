@@ -1,0 +1,17 @@
+{
+  "header": {
+    "crypto": {
+      "cipher": "AES-256",
+      "compression": "GZip"
+    }
+  },
+  "database": {
+    "meta": {
+      "name": "asdasda.json",
+      "description": "Personal password database",
+      "Key": "cae28ba766e4cb4f15655c19918b15a5fa6c6c690f5548132598dfc6ca459ac1",
+      "salt": "cef30c43c0a5bb5e37659ed784c132a4"
+    },
+    "entries": []
+  }
+}

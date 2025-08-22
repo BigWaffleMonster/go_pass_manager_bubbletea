@@ -77,7 +77,22 @@ func ReadConfigFile() AppConfig {
 	return config
 }
 
-func ReadDBsFolder() {}
+func ReadDBsFolder(folderPath string) ([]string, error) {
+	var temp []string
+	data, err := os.ReadDir(folderPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range data {
+		ext := s.Name()[strings.LastIndex(s.Name(), ".")+1:]
+		if ext == "json" {
+			temp = append(temp, s.Name())
+		}
+	}
+
+	return temp, nil
+}
 
 // Функция для чтения файла
 func ReadPasswordFile(filename string) (*PasswordFile, error) {

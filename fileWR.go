@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/google/uuid"
 )
 
 // Struct for app config
@@ -42,7 +45,7 @@ type Database struct {
 type Meta struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Key         string `json:"Key"`
+	Hash        string `json:"hash"`
 	Salt        string `json:"salt"`
 }
 
@@ -94,9 +97,31 @@ func ReadDBsFolder(folderPath string) ([]string, error) {
 	return temp, nil
 }
 
+func IsFileHashValid(filename, masterPassword string) (isOk bool, salt []byte, err error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return false, nil, fmt.Errorf("ошибка чтения файла: %v", err)
+	}
+
+	// Парсим JSON
+	var passwordFile PasswordFile
+	err = json.Unmarshal(data, &passwordFile)
+	if err != nil {
+		return false, nil, fmt.Errorf("ошибка парсинга JSON: %v", err)
+	}
+
+	hash := MakeHash(passwordFile.Database.Meta.Name, masterPassword)
+	if fmt.Sprintf("%x", hash) != passwordFile.Database.Meta.Hash {
+		fmt.Print("not equal")
+		return false, nil, nil
+	} else {
+		return true, []byte(passwordFile.Database.Meta.Salt), nil
+	}
+}
+
 // Функция для чтения файла
-func ReadPasswordFile(filename string) (*PasswordFile, error) {
-	// Читаем файл
+func ReadPasswordFile(filename string, key []byte) ([]table.Row, error) {
+	var decryptedData []table.Row
 
 	//TODO filePath := filepath.Join(config.folder, filename)
 	data, err := os.ReadFile(filename)
@@ -111,15 +136,88 @@ func ReadPasswordFile(filename string) (*PasswordFile, error) {
 		return nil, fmt.Errorf("ошибка парсинга JSON: %v", err)
 	}
 
-	return &passwordFile, nil
+	for _, d := range passwordFile.Database.Entries {
+		dec_d, err := DecryptAES256(d.Password, key)
+		if err != nil {
+			// err = err
+			break
+		}
+		decryptedData = append(decryptedData, table.Row{d.Title, dec_d})
+	}
+
+	return decryptedData, nil
 }
 
-func AddToPasswordFile(data any) error {
+func AddToPasswordFile(dbsFolder, filename, title, password string, key []byte) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("ошибка чтения файла: %v", err)
+	}
+
+	// Парсим JSON
+	var passwordFile PasswordFile
+	err = json.Unmarshal(data, &passwordFile)
+	if err != nil {
+		return fmt.Errorf("ошибка парсинга JSON: %v", err)
+	}
+
+	hashedPassword, err := EncryptAES256([]byte(password), key)
+	if err != nil {
+		return err
+	}
+
+	entry := Entry{ID: uuid.NewString(), Title: title, Password: hashedPassword}
+
+	passwordFile.Database.Entries = append(passwordFile.Database.Entries, entry)
+
+	newData, err := json.MarshalIndent(passwordFile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("ошибка сериализации: %v", err)
+	}
+
+	err = os.WriteFile(filepath.Join(dbsFolder, filename), newData, 0644)
+	if err != nil {
+		fmt.Println("Error writing file:", err)
+		return err
+	}
 	return nil
 }
 
+func RemoveFromPasswordFile(dbsFolder, filename string, selectedIndex int) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("ошибка чтения файла: %v", err)
+	}
+
+	// Парсим JSON
+	var passwordFile PasswordFile
+	err = json.Unmarshal(data, &passwordFile)
+	if err != nil {
+		return fmt.Errorf("ошибка парсинга JSON: %v", err)
+	}
+
+	// Find and remove entry
+	entries := passwordFile.Database.Entries
+	passwordFile.Database.Entries = append(entries[:selectedIndex], entries[selectedIndex+1:]...)
+
+	newData, err := json.MarshalIndent(passwordFile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("ошибка сериализации: %v", err)
+	}
+
+	err = os.WriteFile(filepath.Join(dbsFolder, filename), newData, 0644)
+	if err != nil {
+		fmt.Println("Error writing file:", err)
+		return err
+	}
+	return nil
+}
+
+// hash its db title hashed with password
 func CreatePasswordFile(filename string, dbsFolder string, masterPassword string) error {
 	filename = filename + ".json"
+
+	hash := MakeHash(filename, masterPassword)
 
 	salt, err := GenerateSalt()
 	if err != nil {
@@ -127,7 +225,6 @@ func CreatePasswordFile(filename string, dbsFolder string, masterPassword string
 	}
 
 	// Хэшируем мастер-пароль
-	hash := GenerateKey(masterPassword, salt)
 
 	db := &PasswordFile{
 		Header: Header{
@@ -140,7 +237,7 @@ func CreatePasswordFile(filename string, dbsFolder string, masterPassword string
 			Meta: Meta{
 				Name:        filename,
 				Description: "Personal password database",
-				Key:         fmt.Sprintf("%x", hash), // Хэш в hex
+				Hash:        fmt.Sprintf("%x", hash),
 				Salt:        fmt.Sprintf("%x", salt), // Соль в hex
 			},
 			Entries: []Entry{}, // Пустой массив entries

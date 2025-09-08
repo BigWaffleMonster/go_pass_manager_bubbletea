@@ -7,10 +7,10 @@
   },
   "database": {
     "meta": {
-      "name": "asdasda.json",
+      "name": "test.json",
       "description": "Personal password database",
-      "Key": "cae28ba766e4cb4f15655c19918b15a5fa6c6c690f5548132598dfc6ca459ac1",
-      "salt": "cef30c43c0a5bb5e37659ed784c132a4"
+      "hash": "ee87fcab7915daf6db0a9fe11570052aa662b5a425b412543341f2511c5f207e",
+      "salt": "ee6c43f69694cb0767003f7658632340"
     },
     "entries": []
   }

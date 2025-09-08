@@ -5,8 +5,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -38,6 +40,28 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("240"))
 
+		// Стили для таблицы - УПРОЩЕННЫЕ И ЦЕНТРИРОВАННЫЕ
+
+	tableStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("240")).
+			Padding(1, 1)
+
+	tableTitleStyle = lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			Bold(true).
+			MarginBottom(0)
+
+	// Стили для центрирования всего блока таблицы
+	tableContainerStyle = lipgloss.NewStyle().
+				Align(lipgloss.Center)
+
+	// Стили для центрирования кнопок
+	buttonsStyle = lipgloss.NewStyle().
+			Align(lipgloss.Center).
+			MarginTop(0).
+			MarginBottom(1)
+
 	// Стили для полей ввода
 	labelStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -58,7 +82,47 @@ var (
 				Border(lipgloss.NormalBorder(), false, false, true, false).
 				BorderForeground(lipgloss.Color("196")).
 				Padding(0, 0)
+
+	// Стили для кнопок
+	buttonStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Padding(0, 1)
+
+	activeButtonStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("170")).
+				Padding(0, 1)
 )
+
+// Global store struct
+type Store struct {
+	data map[string]interface{}
+	mu   sync.RWMutex
+}
+
+// Global instance
+var GlobalStore = &Store{
+	data: make(map[string]interface{}),
+}
+
+// Methods
+func (s *Store) Set(key string, value interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = value
+}
+
+func (s *Store) Get(key string) (interface{}, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.data[key]
+	return value, exists
+}
+
+func (s *Store) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data, key)
+}
 
 type item string
 
@@ -95,21 +159,30 @@ const (
 	statePasswordInput
 	stateKeyBindings
 	stateAddDbForm
+	stateDbView
+	stateAddRecordForm
 )
 
 type model struct {
-	state              state
-	list               list.Model
-	fileList           list.Model
-	passwordInput      textinput.Model
-	titleInput         textinput.Model
-	choice             string
-	fileChoice         string
-	quitting           bool
-	width              int
-	height             int
-	titleInputError    bool
-	passwordInputError bool
+	state                state
+	list                 list.Model
+	fileList             list.Model
+	passwordInput        textinput.Model
+	titleInput           textinput.Model
+	dbTitleInput         textinput.Model
+	dbPasswordInput      textinput.Model
+	choice               string
+	fileChoice           string
+	quitting             bool
+	width                int
+	height               int
+	titleInputError      bool
+	passwordInputError   bool
+	dbTitleInputError    bool
+	dbPasswordInputError bool
+	table                table.Model
+	dbData               []table.Row
+	activeButton         int // 0 - Add, 1 - Delete
 }
 
 // Инициализация модели с динамической высотой списка
@@ -132,15 +205,40 @@ func initialModel() model {
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
 
+	// Инициализация таблицы - УПРОЩЕННАЯ
+	columns := []table.Column{
+		{Title: "Title", Width: 30},
+		{Title: "Password", Width: 30},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows([]table.Row{}),
+		table.WithFocused(true),
+		table.WithHeight(7),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Align(lipgloss.Center) // Центрируем заголовки
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("170"))
+	t.SetStyles(s)
+
 	return model{
 		state:  stateMainMenu,
 		list:   l,
 		width:  80,
 		height: 24,
+		table:  t,
+		dbData: []table.Row{},
 	}
 }
 
-// Создание списка файлов БД с красными placeholder'ами при ошибках
+// Создание списка файлов БД
 func createFileList() list.Model {
 	var files []list.Item
 	config := ReadConfigFile()
@@ -168,14 +266,10 @@ func createFileList() list.Model {
 	return fileList
 }
 
-// Создание поля ввода пароля с возможностью установки красного placeholder'а
-func createPasswordInputWithError(errorState bool) textinput.Model {
+// Создание поля ввода пароля
+func createPasswordInput() textinput.Model {
 	input := textinput.New()
-	if errorState {
-		input.Placeholder = "Enter password" // Оставляем обычный placeholder, стилизуем через границу
-	} else {
-		input.Placeholder = "Enter password"
-	}
+	input.Placeholder = "Enter password"
 	input.Focus()
 	input.CharLimit = 156
 	input.Width = 30
@@ -184,23 +278,40 @@ func createPasswordInputWithError(errorState bool) textinput.Model {
 	return input
 }
 
-// Создание поля ввода заголовка с возможностью установки красного placeholder'а
-func createTitleInputWithError(errorState bool) textinput.Model {
+// Создание поля ввода заголовка
+func createTitleInput() textinput.Model {
 	input := textinput.New()
-	if errorState {
-		input.Placeholder = "Enter database title" // Оставляем обычный placeholder, стилизуем через границу
-	} else {
-		input.Placeholder = "Enter database title"
-	}
+	input.Placeholder = "Enter database title"
 	input.Focus()
 	input.CharLimit = 100
 	input.Width = 30
 	return input
 }
 
+// Создание поля ввода для заголовка записи в БД
+func createDbTitleInput() textinput.Model {
+	input := textinput.New()
+	input.Placeholder = "Enter record title"
+	input.Focus()
+	input.CharLimit = 100
+	input.Width = 30
+	return input
+}
+
+// Создание поля ввода для пароля записи в БД
+func createDbPasswordInput() textinput.Model {
+	input := textinput.New()
+	input.Placeholder = "Enter record password"
+	input.Focus()
+	input.CharLimit = 156
+	input.Width = 30
+	input.EchoMode = textinput.EchoNormal
+	return input
+}
+
 // Обработка глобальных клавиш
 func (m *model) handleGlobalKeys(keypress string) (tea.Model, tea.Cmd) {
-	if m.state == stateAddDbForm || m.state == statePasswordInput {
+	if m.state == stateAddDbForm || m.state == statePasswordInput || m.state == stateAddRecordForm {
 		return nil, nil
 	}
 
@@ -225,8 +336,14 @@ func (m *model) resetToMainMenu() model {
 	m.fileChoice = ""
 	m.passwordInput = textinput.Model{}
 	m.titleInput = textinput.Model{}
+	m.dbTitleInput = textinput.Model{}
+	m.dbPasswordInput = textinput.Model{}
 	m.titleInputError = false
 	m.passwordInputError = false
+	m.dbTitleInputError = false
+	m.dbPasswordInputError = false
+	m.dbData = []table.Row{}
+	m.activeButton = 0
 	return *m
 }
 
@@ -251,6 +368,16 @@ func (m *model) goBack() model {
 		m.passwordInput = textinput.Model{}
 		m.titleInputError = false
 		m.passwordInputError = false
+	case stateDbView:
+		m.state = stateFileList
+		m.fileChoice = ""
+		m.dbData = []table.Row{}
+	case stateAddRecordForm:
+		m.state = stateDbView
+		m.dbTitleInput = textinput.Model{}
+		m.dbPasswordInput = textinput.Model{}
+		m.dbTitleInputError = false
+		m.dbPasswordInputError = false
 	}
 	return *m
 }
@@ -266,8 +393,8 @@ func (m *model) handleMainMenuEnter() (tea.Model, tea.Cmd) {
 
 	switch m.choice {
 	case "Add db":
-		m.titleInput = createTitleInputWithError(false)
-		m.passwordInput = createPasswordInputWithError(false)
+		m.titleInput = createTitleInput()
+		m.passwordInput = createPasswordInput()
 		m.titleInput.Focus()
 		m.passwordInput.Blur()
 		m.titleInputError = false
@@ -293,29 +420,65 @@ func (m *model) handleFileListEnter() (tea.Model, tea.Cmd) {
 	}
 
 	m.fileChoice = string(i)
-	m.passwordInput = createPasswordInputWithError(false)
+	m.passwordInput = createPasswordInput()
 	m.passwordInputError = false
 	m.state = statePasswordInput
 
 	return *m, nil
 }
 
-// Обработка Enter при вводе пароля
 func (m *model) handlePasswordEnter() (tea.Model, tea.Cmd) {
+
 	if m.passwordInput.Value() == "" {
 		m.passwordInputError = true
-		// Пересоздаем input с красной границей
-		m.passwordInput = createPasswordInputWithError(true)
-		if m.state == stateAddDbForm {
-			m.passwordInput.Focus()
-		}
 		return m, nil
 	}
 
-	// Здесь можно обработать введенный пароль
-	fmt.Printf("File: %s, Password: %s\n", m.fileChoice, m.passwordInput.Value())
-	m.quitting = true
-	return *m, tea.Quit
+	isOk, salt, err := IsFileHashValid(m.fileChoice, m.passwordInput.Value())
+	if err != nil {
+		return m, nil
+	}
+	if !isOk {
+		return m, nil
+	}
+
+	key := GenerateKey(m.passwordInput.Value(), salt)
+
+	data, err := ReadPasswordFile(m.fileChoice, key)
+	if err != nil {
+		return m, nil
+	}
+
+	GlobalStore.Set("key", key)
+	m.dbData = data
+
+	columns := []table.Column{
+		{Title: "Title", Width: 30},
+		{Title: "Password", Width: 30},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(m.dbData),
+		table.WithFocused(true),
+		table.WithHeight(7),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Align(lipgloss.Center) // Центрируем заголовки
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("170"))
+	t.SetStyles(s)
+
+	m.table = t
+	m.state = stateDbView
+	m.activeButton = 0
+
+	return *m, nil
 }
 
 // Обработка Enter в форме добавления БД
@@ -326,22 +489,8 @@ func (m *model) handleAddDbFormEnter() (tea.Model, tea.Cmd) {
 	m.titleInputError = titleEmpty
 	m.passwordInputError = passwordEmpty
 
-	// Если есть пустые поля, пересоздаем inputs с красными границами
+	// Если есть пустые поля, не продолжаем обработку
 	if titleEmpty || passwordEmpty {
-		if titleEmpty {
-			m.titleInput = createTitleInputWithError(true)
-			m.titleInput.Blur()
-		}
-		if passwordEmpty {
-			m.passwordInput = createPasswordInputWithError(true)
-			m.passwordInput.Blur()
-		}
-		// Устанавливаем фокус на первое пустое поле
-		if titleEmpty {
-			m.titleInput.Focus()
-		} else {
-			m.passwordInput.Focus()
-		}
 		return m, nil
 	}
 
@@ -364,6 +513,62 @@ func (m *model) handleAddDbFormEnter() (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
+// Обработка Enter в форме добавления записи - УПРОЩЕННАЯ
+func (m *model) handleAddRecordEnter() (tea.Model, tea.Cmd) {
+	titleEmpty := m.dbTitleInput.Value() == ""
+	passwordEmpty := m.dbPasswordInput.Value() == ""
+
+	m.dbTitleInputError = titleEmpty
+	m.dbPasswordInputError = passwordEmpty
+
+	// Если есть пустые поля, не продолжаем обработку
+	if titleEmpty || passwordEmpty {
+		return m, nil
+	}
+
+	key, _ := GlobalStore.Get("key")
+	config := ReadConfigFile()
+
+	err := AddToPasswordFile(config.DBsFolder, m.fileChoice, m.dbTitleInput.Value(), m.passwordInput.Value(), key.([]byte))
+	if err != nil {
+		return m, nil
+	}
+
+	newRow := table.Row{m.dbTitleInput.Value(), m.dbPasswordInput.Value()}
+	m.dbData = append(m.dbData, newRow)
+
+	columns := []table.Column{
+		{Title: "Title", Width: 30},
+		{Title: "Password", Width: 30},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(m.dbData),
+		table.WithFocused(true),
+		table.WithHeight(7),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("170"))
+	t.SetStyles(s)
+
+	m.table = t
+	m.state = stateDbView
+	m.dbTitleInput = textinput.Model{}
+	m.dbPasswordInput = textinput.Model{}
+	m.dbTitleInputError = false
+	m.dbPasswordInputError = false
+	m.activeButton = 0
+
+	return *m, nil
+}
+
 // Обработка Enter в биндах клавиш
 func (m *model) handleBindingsEnter() (tea.Model, tea.Cmd) {
 	m.state = stateMainMenu
@@ -376,6 +581,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	config := ReadConfigFile()
 	if windowMsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = windowMsg.Width
 		m.height = windowMsg.Height
@@ -389,6 +595,162 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if model, cmd := m.handleGlobalKeys(keyMsg.String()); cmd != nil || m.quitting {
 			return model, cmd
+		}
+
+		// Обработка клавиш в режиме просмотра БД
+		if m.state == stateDbView {
+			switch keyMsg.String() {
+			case "a":
+				// Добавить новую запись
+				m.dbTitleInput = createDbTitleInput()
+				m.dbPasswordInput = createDbPasswordInput()
+				m.dbTitleInput.Focus()
+				m.dbPasswordInput.Blur()
+				m.dbTitleInputError = false
+				m.dbPasswordInputError = false
+				m.state = stateAddRecordForm
+				return m, nil
+			case "d":
+				// Удалить выбранную запись
+				if len(m.dbData) > 0 {
+					selectedIndex := m.table.Cursor()
+					if selectedIndex < len(m.dbData) {
+						// Удаляем выбранную запись
+						err := RemoveFromPasswordFile(config.DBsFolder, m.fileChoice, selectedIndex)
+						if err != nil {
+							return m, nil
+						}
+
+						key, _ := GlobalStore.Get("key")
+						data, err := ReadPasswordFile(m.fileChoice, key.([]byte))
+						if err != nil {
+							return m, nil
+						}
+
+						m.dbData = data
+
+						// Обновляем таблицу - УПРОЩЕННАЯ
+						columns := []table.Column{
+							{Title: "Title", Width: 30},
+							{Title: "Password", Width: 30},
+						}
+
+						t := table.New(
+							table.WithColumns(columns),
+							table.WithRows(m.dbData),
+							table.WithFocused(true),
+							table.WithHeight(7),
+						)
+
+						s := table.DefaultStyles()
+						s.Header = s.Header.
+							BorderStyle(lipgloss.NormalBorder()).
+							BorderForeground(lipgloss.Color("240")).
+							BorderBottom(true)
+						s.Selected = s.Selected.
+							Foreground(lipgloss.Color("170"))
+						t.SetStyles(s)
+
+						m.table = t
+					}
+				}
+				return m, nil
+			case "left":
+				// Переключение между кнопками
+				m.activeButton--
+				if m.activeButton < 0 {
+					m.activeButton = 1
+				}
+				return m, nil
+			case "right":
+				// Переключение между кнопками
+				m.activeButton++
+				if m.activeButton > 1 {
+					m.activeButton = 0
+				}
+				return m, nil
+			case "enter":
+				// Действие по выбранной кнопке
+				switch m.activeButton {
+				case 0: // Add
+					m.dbTitleInput = createDbTitleInput()
+					m.dbPasswordInput = createDbPasswordInput()
+					m.dbTitleInput.Focus()
+					m.dbPasswordInput.Blur()
+					m.dbTitleInputError = false
+					m.dbPasswordInputError = false
+					m.state = stateAddRecordForm
+				case 1: // Delete
+					if len(m.dbData) > 0 {
+						selectedIndex := m.table.Cursor()
+						if selectedIndex < len(m.dbData) {
+							// Удаляем выбранную запись
+							err := RemoveFromPasswordFile(config.DBsFolder, m.fileChoice, selectedIndex)
+							if err != nil {
+								return m, nil
+							}
+
+							key, _ := GlobalStore.Get("key")
+							data, err := ReadPasswordFile(m.fileChoice, key.([]byte))
+							if err != nil {
+								return m, nil
+							}
+
+							m.dbData = data
+
+							// Обновляем таблицу - УПРОЩЕННАЯ
+							columns := []table.Column{
+								{Title: "Title", Width: 30},
+								{Title: "Password", Width: 30},
+							}
+
+							t := table.New(
+								table.WithColumns(columns),
+								table.WithRows(m.dbData),
+								table.WithFocused(true),
+								table.WithHeight(7),
+							)
+
+							s := table.DefaultStyles()
+							s.Header = s.Header.
+								BorderStyle(lipgloss.NormalBorder()).
+								BorderForeground(lipgloss.Color("240")).
+								BorderBottom(true)
+							s.Selected = s.Selected.
+								Foreground(lipgloss.Color("170"))
+							t.SetStyles(s)
+
+							m.table = t
+						}
+					}
+				}
+				return m, nil
+			}
+		}
+
+		if m.state == stateAddRecordForm {
+			switch keyMsg.String() {
+			case "esc":
+				m.state = stateDbView
+				m.dbTitleInput = textinput.Model{}
+				m.dbPasswordInput = textinput.Model{}
+				m.dbTitleInputError = false
+				m.dbPasswordInputError = false
+				return m, nil
+
+			case "enter":
+				return m.handleAddRecordEnter()
+
+			case "tab":
+				if m.dbTitleInput.Focused() {
+					m.dbTitleInput.Blur()
+					m.dbPasswordInput.Focus()
+				} else {
+					m.dbPasswordInput.Blur()
+					m.dbTitleInput.Focus()
+				}
+				return m, nil
+			}
 		}
 
 		if m.state == stateAddDbForm {
@@ -449,6 +811,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.passwordInput, cmd = m.passwordInput.Update(msg)
+	case stateDbView:
+		m.table, cmd = m.table.Update(msg)
+	case stateAddRecordForm:
+		m.dbTitleInput, cmd = m.dbTitleInput.Update(msg)
+		if cmd != nil {
+			return m, cmd
+		}
+		m.dbPasswordInput, cmd = m.dbPasswordInput.Update(msg)
 	}
 
 	return m, cmd
@@ -485,6 +855,27 @@ func (m model) renderInputWithError(input textinput.Model, hasError bool, label 
 	inputRow := lipgloss.JoinHorizontal(lipgloss.Left, styledLabel, inputView)
 
 	return inputRow
+}
+
+// Рендеринг кнопок - ЦЕНТРИРОВАННЫЙ
+func (m model) renderButtons() string {
+	buttons := []string{
+		"Add",
+		"Delete",
+	}
+
+	var renderedButtons []string
+	for i, button := range buttons {
+		if i == m.activeButton {
+			renderedButtons = append(renderedButtons, activeButtonStyle.Render(button))
+		} else {
+			renderedButtons = append(renderedButtons, buttonStyle.Render(button))
+		}
+	}
+
+	// Соединяем кнопки по горизонтали
+	buttonsRow := lipgloss.JoinHorizontal(lipgloss.Left, renderedButtons...)
+	return buttonsRow
 }
 
 func (m model) View() string {
@@ -526,6 +917,47 @@ func (m model) View() string {
 		styledForm := formStyle.Render(formContent)
 		content = m.centerContent(styledForm)
 
+	case stateDbView:
+		// Создаем заголовок таблицы с названием файла
+		tableTitle := tableTitleStyle.Render(m.fileChoice)
+
+		// Получаем контент таблицы
+		tableContent := m.table.View()
+
+		// Применяем стиль к таблице
+		tableWithStyle := tableStyle.Render(tableContent)
+
+		// Центрируем всю таблицу со стилем
+		centeredTable := tableContainerStyle.Render(tableWithStyle)
+
+		// Рендерим центрированные кнопки
+		buttons := buttonsStyle.Render(m.renderButtons())
+
+		// Комбинируем все элементы
+		viewContent := fmt.Sprintf(
+			"%s\n%s\n%s\n%s",
+			tableTitle,
+			centeredTable,
+			buttons,
+			"(↑/↓ to navigate table, ←/→ to select action, Enter to execute, a/d for quick actions, b to go back)",
+		)
+
+		// Центрируем весь блок
+		content = m.centerContent(viewContent)
+
+	case stateAddRecordForm:
+		titleField := m.renderInputWithError(m.dbTitleInput, m.dbTitleInputError, "Title")
+		passwordField := m.renderInputWithError(m.dbPasswordInput, m.dbPasswordInputError, "Password")
+
+		formContent := fmt.Sprintf(
+			"Add New Record\n\n%s\n\n%s\n\n%s",
+			titleField,
+			passwordField,
+			"(Tab to switch fields, Enter to submit, Esc to cancel)",
+		)
+		styledForm := formStyle.Render(formContent)
+		content = m.centerContent(styledForm)
+
 	case stateKeyBindings:
 		bindingsContent := bindingsStyle.Render(getKeyBindingsText())
 		content = m.centerContent(bindingsContent)
@@ -534,7 +966,6 @@ func (m model) View() string {
 	if m.quitting {
 		var quitContent string
 		if m.choice != "" && m.fileChoice != "" {
-			quitContent = quitTextStyle.Render(fmt.Sprintf("Selected: %s -> %s", m.choice, m.fileChoice))
 		} else {
 			quitContent = quitTextStyle.Render("Not hungry? That's cool.")
 		}
@@ -562,6 +993,19 @@ Main Menu:
 File Selection:
   ↑/↓          - Navigate files
   Enter        - Select file
+
+Database View:
+  ↑/↓          - Navigate table rows
+  ←/→          - Select action (Add/Delete)
+  Enter        - Execute selected action
+  a            - Add new record (quick)
+  d            - Delete selected record (quick)
+  b            - Go back to file selection
+
+Add Record Form:
+  Tab          - Switch between fields
+  Enter        - Submit form
+  Esc          - Cancel and return to database view
 
 Add Database Form:
   Tab          - Switch between fields

@@ -18,7 +18,7 @@ func GenerateSalt() ([]byte, error) {
 }
 
 // Функция для шифрования данных с AES-256
-func encryptAES256(plaintext, key []byte) (string, error) {
+func EncryptAES256(plaintext, key []byte) (string, error) {
 	// Создаем блочный шифр
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -41,7 +41,7 @@ func encryptAES256(plaintext, key []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-func decryptAES256(encryptedData string, key []byte) (string, error) {
+func DecryptAES256(encryptedData string, key []byte) (string, error) {
 	// Декодируем base64
 	ciphertext, err := base64.StdEncoding.DecodeString(encryptedData)
 	if err != nil {
@@ -70,7 +70,9 @@ func decryptAES256(encryptedData string, key []byte) (string, error) {
 	return string(ciphertext), nil
 }
 
-func addEntrie() {}
+func MakeHash(title, masterPassword string) []byte {
+	return argon2.IDKey([]byte(title), []byte(masterPassword), 1, 64*1024, 4, 32)
+}
 
 // Функция для генерации ключа из мастер-пароля
 func GenerateKey(masterPassword string, salt []byte) []byte {

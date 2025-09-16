@@ -112,7 +112,6 @@ func IsFileHashValid(filename, masterPassword string) (isOk bool, salt []byte, e
 
 	hash := MakeHash(passwordFile.Database.Meta.Name, masterPassword)
 	if fmt.Sprintf("%x", hash) != passwordFile.Database.Meta.Hash {
-		fmt.Print("not equal")
 		return false, nil, nil
 	} else {
 		return true, []byte(passwordFile.Database.Meta.Salt), nil
@@ -159,6 +158,12 @@ func AddToPasswordFile(dbsFolder, filename, title, password string, key []byte) 
 	err = json.Unmarshal(data, &passwordFile)
 	if err != nil {
 		return fmt.Errorf("ошибка парсинга JSON: %v", err)
+	}
+
+	for _, e := range passwordFile.Database.Entries {
+		if e.Title == title {
+			return fmt.Errorf("duplicated title")
+		}
 	}
 
 	hashedPassword, err := EncryptAES256([]byte(password), key)

@@ -1,0 +1,17 @@
+{
+  "header": {
+    "crypto": {
+      "cipher": "AES-256",
+      "compression": "GZip"
+    }
+  },
+  "database": {
+    "meta": {
+      "name": "wweqe.json",
+      "description": "Personal password database",
+      "hash": "44d570403e1c54c16ba6b665250d699c33cfa0710eec5f8c1fde690a9e9581d4",
+      "salt": "2920ea5bd7c6b1a681ced22506d68412"
+    },
+    "entries": []
+  }
+}

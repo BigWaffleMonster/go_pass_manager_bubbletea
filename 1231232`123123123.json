@@ -1,0 +1,17 @@
+{
+  "header": {
+    "crypto": {
+      "cipher": "AES-256",
+      "compression": "GZip"
+    }
+  },
+  "database": {
+    "meta": {
+      "name": "1231232`123123123.json",
+      "description": "Personal password database",
+      "hash": "304d18a5cfd8f804b4615286dd945a68542b21cd215cf87c6841d10558093df0",
+      "salt": "62d6bb9ecaf01a81934523ffee3f13bf"
+    },
+    "entries": []
+  }
+}

@@ -268,7 +268,7 @@ func createFileList() (list.Model, error) {
 	fileList := list.New(files, itemDelegate{}, defaultWidth, listHeight)
 	fileList.Title = "Select file"
 	fileList.SetShowStatusBar(true)
-	fileList.SetFilteringEnabled(true) // Enable filtering
+	fileList.SetFilteringEnabled(false) // Enable filtering
 	fileList.Styles.Title = titleStyle
 	fileList.Styles.PaginationStyle = paginationStyle
 	fileList.Styles.HelpStyle = helpStyle

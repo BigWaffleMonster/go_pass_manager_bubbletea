@@ -218,6 +218,14 @@ func RemoveFromPasswordFile(dbsFolder, filename string, selectedIndex int) error
 	return nil
 }
 
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
+
 // hash its db title hashed with password
 func CreatePasswordFile(filename string, dbsFolder string, masterPassword string) error {
 	filename = filename + ".json"
@@ -230,6 +238,9 @@ func CreatePasswordFile(filename string, dbsFolder string, masterPassword string
 	}
 
 	// Хэшируем мастер-пароль
+	if fileExists(filepath.Join(dbsFolder, filename)) {
+		return fmt.Errorf("file already exists")
+	}
 
 	db := &PasswordFile{
 		Header: Header{

@@ -10,32 +10,14 @@
       "name": "test.json",
       "description": "Personal password database",
       "hash": "ee87fcab7915daf6db0a9fe11570052aa662b5a425b412543341f2511c5f207e",
-      "salt": "ee6c43f69694cb0767003f7658632340"
+      "salt": "af81bd3b4b3d96f8fcc65b864eb660c1"
     },
     "entries": [
       {
-        "id": "ac053a2e-f6b7-4639-ac70-6ffd8f93f6ab",
-        "title": "qwe",
+        "id": "7e835055-d90d-42e9-bbe3-213da74803c0",
+        "title": "test",
         "username": "",
-        "password": "0klGCX2+kHG6E4FuxWj5sjf6og==",
-        "url": "",
-        "notes": "",
-        "created": "0001-01-01T00:00:00Z"
-      },
-      {
-        "id": "aa90da29-cf06-4866-9faa-c423722fabc3",
-        "title": "qweqwe",
-        "username": "",
-        "password": "IEz9/vCX+nxFIHGLGexhm4yCpnA7vg==",
-        "url": "",
-        "notes": "",
-        "created": "0001-01-01T00:00:00Z"
-      },
-      {
-        "id": "75df2017-bdc4-4ddb-8962-2bddce37b856",
-        "title": "qweqweqweqe",
-        "username": "",
-        "password": "ysE4sMUwVDmLQ54Rq1osA/yN3GahdpW608zf",
+        "password": "jrD1qG7e6ncCKbPFFqjfoK9beA==",
         "url": "",
         "notes": "",
         "created": "0001-01-01T00:00:00Z"
